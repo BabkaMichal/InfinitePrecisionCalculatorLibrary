@@ -7,10 +7,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <iomanip>
+#include <utility>
 
 /*TODO:
 math functions
-other operators multiple types
 exception
 */
 
@@ -112,9 +112,12 @@ class MPInt {
 			return result;
 		}
 
-		//'-' overload for substraction
-		MPInt operator-(const MPInt& other) const {
-			MPInt result;
+		// '-' overload for subtraction
+		template <std::size_t OtherBytes>
+		auto operator-(const MPInt<OtherBytes>& other) const
+			-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+			using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
+			ResultType result;
 
 			//same sign
 			if (sign == other.sign) {
@@ -122,7 +125,7 @@ class MPInt {
 
 				//same number
 				if (comparison == 0) {
-					return MPInt();
+					return ResultType();
 				}
 				//this bigger
 				if (comparison > 0) {
@@ -147,13 +150,16 @@ class MPInt {
 		}
 
 		//'*' overload for multiplication
-		MPInt operator*(const MPInt& other) const {
+		template <std::size_t OtherBytes>
+		auto operator*(const MPInt<OtherBytes>& other) const
+			-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
 			if (isZero() || other.isZero()) {
-				return MPInt();
+				return MPInt<maxPrecision(MaxBytes, OtherBytes)>();
 			}
 
 			//multiply magnitudes
-			MPInt result;
+			using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
+			ResultType result;
 			result.blocks = multiplyMagnitude(blocks, other.blocks);
 			result.sign = sign * other.sign;
 
@@ -162,14 +168,17 @@ class MPInt {
 		}
 
 		//'/' overload for division
-		MPInt operator/(const MPInt& other) const {
+		template <std::size_t OtherBytes>
+		auto operator/(const MPInt<OtherBytes>& other) const
+			-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
 			if (other.isZero()) {
 				//TODO: custom exception class
 				throw std::domain_error("Division by zero");
 			}
 			
 			//divide magnitudes
-			MPInt result;
+			using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
+			ResultType result;
 			result.blocks = divideMagnitude(blocks, other.blocks);
 			result.sign = sign * other.sign;
 
@@ -178,26 +187,34 @@ class MPInt {
 		}
 
 		//'+=' overload for addition assignment
-		MPInt& operator+=(const MPInt& other) {
-			*this = *this + other;
+		template <std::size_t OtherBytes>
+		MPInt& operator+=(const MPInt<OtherBytes>& other) {
+			auto result = *this + other;
+			assignResult(result);
 			return *this;
 		}
 
 		//'-=' overload for subtraction assignment
-		MPInt& operator-=(const MPInt& other) {
-			*this = *this - other;
+		template <std::size_t OtherBytes>
+		MPInt& operator-=(const MPInt<OtherBytes>& other) {
+			auto result = *this - other;
+			assignResult(result);
 			return *this;
 		}
 
 		//'*=' overload for multiplication assignment
-		MPInt& operator*=(const MPInt& other) {
-			*this = *this * other;
+		template <std::size_t OtherBytes>
+		MPInt& operator*=(const MPInt<OtherBytes>& other) {
+			auto result = *this * other;
+			assignResult(result);
 			return *this;
 		}
 
 		//'/=' overload for division assignment
-		MPInt& operator/=(const MPInt& other) {
-			*this = *this / other;
+		template <std::size_t OtherBytes>
+		MPInt& operator/=(const MPInt<OtherBytes>& other) {
+			auto result = *this / other;
+			assignResult(result);
 			return *this;
 		}
 
@@ -318,29 +335,42 @@ class MPInt {
 			}
 		}
 
+		//compound assignment keeps this object's precision.
+		//check the result before changing *this.
+		template <std::size_t ResultBytes>
+		void assignResult(const MPInt<ResultBytes>& result) {
+			MPInt narrowedResult;
+
+			narrowedResult.blocks = result.blocks;
+			narrowedResult.sign = result.sign;
+			narrowedResult.checkSize();
+
+			*this = std::move(narrowedResult);
+		}
+
 		//MATH helpers
 		bool isZero() const {
 			return blocks.size() == 1 && blocks[0] == 0;
 		}
 
-		addMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		static std::vector<uint32_t> addMagnitude(
+			const std::vector<uint32_t>& a,
+			const std::vector<uint32_t>& b);
 
-		}
+		static int compareMagnitude(
+			const std::vector<uint32_t>& a,
+			const std::vector<uint32_t>& b);
 
-		compareMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		static std::vector<uint32_t> subtractMagnitude(
+			const std::vector<uint32_t>& a,
+			const std::vector<uint32_t>& b);
 
-		}
+		static std::vector<uint32_t> multiplyMagnitude(
+			const std::vector<uint32_t>& a,
+			const std::vector<uint32_t>& b);
 
-		subtractMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-
-		}
-
-		multiplyMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-		
-		}
-
-		divideMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
-
-		}
+		static std::vector<uint32_t> divideMagnitude(
+			const std::vector<uint32_t>& a,
+			const std::vector<uint32_t>& b);
 
 };
