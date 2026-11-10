@@ -9,14 +9,33 @@
 #include <iomanip>
 
 /*TODO:
-copy,move sematics
 math functions
+other operators multiple types
+exception
 */
 
+//unlimited size constant
 inline constexpr std::size_t Unlimited = std::numeric_limits<std::size_t>::max();
+
+//max precision for multiple MPInt types
+consteval std::size_t maxPrecision(std::size_t left, std::size_t right) {
+	if (left == Unlimited || right == Unlimited) {
+		return Unlimited;
+	}
+
+	if (left > right) {
+		return left;
+	}
+
+	return right;
+}
 
 template <std::size_t MaxBytes>
 class MPInt {
+	//can access private members of other MPInt types
+	template <std::size_t>
+	friend class MPInt;
+
 	//asert of template parameters
 	static_assert(
 		MaxBytes == Unlimited || MaxBytes >= 4,
@@ -24,6 +43,13 @@ class MPInt {
 		);
 
 	public:
+		//copy move schematic, everything default because of vector
+		MPInt(const MPInt&) = default;
+		MPInt(MPInt&&) = default;
+
+		MPInt& operator=(const MPInt&) = default;
+		MPInt& operator=(MPInt&&) = default;
+
 		//default constructor
 		MPInt() : sign(1), blocks(1, 0) {}
 
@@ -49,8 +75,12 @@ class MPInt {
 		}
 
 		//'+' overload for addition
-		MPInt operator+(const MPInt& other) const {
-			MPInt result;
+		template <std::size_t OtherBytes>
+		auto operator+(const MPInt<OtherBytes>& other) const
+			-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+			//takes the bigger precision
+			using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
+			ResultType result;
 
 			//same sign
 			if (sign == other.sign) {
@@ -64,7 +94,7 @@ class MPInt {
 
 				//same number
 				if (comparison == 0) {
-					return MPInt();
+					return ResultType();
 				}
 				//this bigger
 				if (comparison > 0) {
