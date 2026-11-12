@@ -10,7 +10,6 @@
 #include <utility>
 
 /*TODO:
-math functions
 exception
 edge cases
 */
@@ -45,7 +44,6 @@ public:
 	//copy move schematic, everything default because of vector
 	MPInt(const MPInt&) = default;
 	MPInt(MPInt&&) = default;
-
 	MPInt& operator=(const MPInt&) = default;
 	MPInt& operator=(MPInt&&) = default;
 
@@ -72,6 +70,7 @@ public:
 
 		checkSize();
 	}
+
 
 	//'+' overload for addition
 	template <std::size_t OtherBytes>
@@ -258,11 +257,11 @@ public:
 
 			//store the remainder as a group of digits
 			groups.push_back(static_cast<uint32_t>(remainder));
+			normalizeMagnitude(remaining);
 
-			//remove leading zeros blocks
-			while (!remaining.empty() && remaining.back() == 0) {
-				remaining.pop_back();
-			}
+			//stop if number is zero
+			if (remaining.size() == 1 && remaining[0] == 0)
+				break;
 		}
 
 		//add negative sign
@@ -286,6 +285,7 @@ public:
 
 		return output;
 	}
+
 
 private:
 	//variables
@@ -334,8 +334,7 @@ private:
 		}
 	}
 
-	//compound assignment keeps this object's precision.
-	//check the result before changing *this.
+	//on asignment narrow the result to the current types precision
 	template <std::size_t ResultBytes>
 	void assignResult(const MPInt<ResultBytes>& result) {
 		MPInt narrowedResult;
@@ -351,7 +350,29 @@ private:
 	bool isZero() const {
 		return blocks.size() == 1 && blocks[0] == 0;
 	}
+	//remove leading zeroes
+	static void normalizeMagnitude(std::vector<uint32_t>& magnitude) {
+		while (magnitude.size() > 1 && magnitude.back() == 0) {
+			magnitude.pop_back();
+		}
+	}
 
+	//Shift the value left and append one input bit.
+	static void shiftLeftAndAddBit(std::vector<uint32_t>& value, uint32_t bit) {
+		uint64_t carry = bit;
+
+		for (std::size_t i = 0; i < value.size(); ++i) {
+			uint64_t shiftedBlock = (static_cast<uint64_t>(value[i]) << 1) + carry;
+			value[i] = static_cast<uint32_t>(shiftedBlock);
+			carry = shiftedBlock >> 32;
+		}
+
+		if (carry != 0) {
+			value.push_back(static_cast<uint32_t>(carry));
+		}
+	}
+
+	//MATH functions
 	static int compareMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
 		//A bigger
 		if (a.size() > b.size())
@@ -374,19 +395,124 @@ private:
 	}
 
 	static std::vector<uint32_t> addMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		//use the longer input size
+		std::size_t resultSize = std::max(a.size(), b.size());
+		std::vector<uint32_t> result;
+		result.reserve(resultSize + 1);
 
+		uint64_t carry = 0;
+
+		//add blocks with carry
+		for (std::size_t i = 0; i < resultSize; i++) {
+			uint64_t sum = carry;
+
+			//add the current blocks when they exist
+			if (i < a.size())
+				sum += a[i];
+
+			if (i < b.size())
+				sum += b[i];
+
+			//store the low 32 bits and carry the rest to the next block
+			result.push_back(static_cast<uint32_t>(sum));
+			carry = sum >> 32;
+		}
+
+		//append a new block if a carry remains
+		if (carry != 0) {
+			result.push_back(static_cast<uint32_t>(carry));
+		}
+
+		return result;
 	}
 
+	//asumes a >= b
 	static std::vector<uint32_t> subtractMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		std::vector<uint32_t> result;
+		result.reserve(a.size());
 
+		uint64_t borrow = 0;
+		const uint64_t blockBase = uint64_t{ 1 } << 32;
+
+		//subtract blocks
+		for (std::size_t i = 0; i < a.size(); ++i) {
+			uint64_t subtractAmount = borrow;
+
+			//treat missing block in b as zero
+			if (i < b.size()) {
+				subtractAmount += b[i];
+			}
+
+			if (a[i] < subtractAmount) {
+				//borrow one unit from next block
+				result.push_back(static_cast<uint32_t>(blockBase + a[i] - subtractAmount));
+				borrow = 1;
+			}
+			else {
+				result.push_back(static_cast<uint32_t>(a[i] - subtractAmount));
+				borrow = 0;
+			}
+		}
+
+		normalizeMagnitude(result);
+		return result;
 	}
 
 	static std::vector<uint32_t> multiplyMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		std::vector<uint32_t> result(a.size() + b.size(), 0);
+		
+		//multiply each block of a by every block of b.
+		for (std::size_t i = 0; i < a.size(); i++) {
+			uint64_t carry = 0;
 
+			for (std::size_t j = 0; j < b.size(); j++) {
+				uint64_t product = static_cast<uint64_t>(a[i]) * b[j] + result[i + j] + carry;
+
+				//store the low 32 bits and carry the rest forward.
+				result[i + j] = static_cast<uint32_t>(product);
+				carry = product >> 32;
+			}
+
+			//store the carry in the next result block.
+			result[i + b.size()] = static_cast<uint32_t>(carry);
+		}
+
+		normalizeMagnitude(result);
+		return result;
 	}
 
 	static std::vector<uint32_t> divideMagnitude(const std::vector<uint32_t>& a, const std::vector<uint32_t>& b) {
+		//build the quotient while keeping the partial remainder.
+		std::vector<uint32_t> quotient(a.size(), 0);
+		std::vector<uint32_t> remainder{ 0 };
 
+		//count the significant bits in the dividend.
+		std::size_t bitCount = (a.size() - 1) * 32;
+		uint32_t highestBlock = a.back();
+
+		while (highestBlock != 0) {
+			++bitCount;
+			highestBlock >>= 1;
+		}
+
+		//process the dividend bits from most significant to least significant.
+		for (std::size_t i = bitCount; i > 0; --i) {
+			std::size_t bitIndex = i - 1;
+			uint32_t currentBit =
+				(a[bitIndex / 32] >> (bitIndex % 32)) & 1U;
+
+			//append this bit to the partial remainder.
+			shiftLeftAndAddBit(remainder, currentBit);
+
+			//subtract the divisor and set this quotient bit when possible.
+			if (compareMagnitude(remainder, b) >= 0) {
+				remainder = subtractMagnitude(remainder, b);
+				quotient[bitIndex / 32] |= uint32_t{ 1 } << (bitIndex % 32);
+			}
+		}
+
+		normalizeMagnitude(quotient);
+		return quotient;
 	}
 
 };
