@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vector>
 #include <cstdint>
 #include <iostream>
@@ -9,8 +11,8 @@
 #include <iomanip>
 #include <utility>
 
+
 /*TODO:
-exception
 edge cases
 */
 
@@ -28,6 +30,27 @@ consteval std::size_t maxPrecision(std::size_t left, std::size_t right) {
 	return right;
 }
 
+//custom exception
+//stores the value, not operands
+struct MPIntOverflowValue {
+	int sign;
+	std::vector<uint32_t> blocks;
+};
+
+class MPIntOverflowException : public std::overflow_error {
+	public:
+		explicit MPIntOverflowException(MPIntOverflowValue value)
+			: std::overflow_error("MPInt result exceeded its precision limit"),
+			overflowValue_(std::move(value)) {}
+
+		const MPIntOverflowValue& overflowValue() const noexcept {
+			return overflowValue_;
+		}
+
+	private:
+		MPIntOverflowValue overflowValue_;
+};
+
 template <std::size_t MaxBytes>
 class MPInt {
 	//can access private members of other MPInt types
@@ -41,11 +64,30 @@ class MPInt {
 		);
 
 public:
-	//copy move schematic, everything default because of vector
+	//copy default because of vector
+	//move also resets the other object to a valid state
 	MPInt(const MPInt&) = default;
-	MPInt(MPInt&&) = default;
 	MPInt& operator=(const MPInt&) = default;
-	MPInt& operator=(MPInt&&) = default;
+
+	MPInt(MPInt&& other) : sign(other.sign), blocks(1, 0) {
+		blocks.swap(other.blocks);
+		other.sign = 1;
+		normalize();
+	}
+
+	MPInt& operator=(MPInt&& other) {
+		if (this != &other) {
+			std::vector<uint32_t> resetBlocks{ 0 };
+
+			blocks = std::move(other.blocks);
+			sign = other.sign;
+			other.blocks.swap(resetBlocks);
+			other.sign = 1;
+			normalize();
+		}
+
+		return *this;
+	}
 
 	//default constructor
 	MPInt() : sign(1), blocks(1, 0) {}
@@ -54,14 +96,12 @@ public:
 	MPInt(const std::string& value) : sign(1), blocks(1, 0) {
 		//sanity checks
 		if (value.empty()) {
-			//TODO: handle error
 			throw std::invalid_argument("empty input");
 		}
 
 		//digit check, pushing to blocks
 		for (char character : value) {
 			if (character < '0' || character > '9') {
-				//TODO: handle error
 				throw std::invalid_argument("Input must contain only digits");
 			}
 			uint32_t digit = static_cast<uint32_t>(character - '0');
@@ -76,6 +116,7 @@ public:
 	template <std::size_t OtherBytes>
 	auto operator+(const MPInt<OtherBytes>& other) const
 		-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+
 		//takes the bigger precision
 		using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
 		ResultType result;
@@ -106,6 +147,7 @@ public:
 			}
 		}
 
+		result.normalize();
 		result.checkSize();
 		return result;
 	}
@@ -114,6 +156,7 @@ public:
 	template <std::size_t OtherBytes>
 	auto operator-(const MPInt<OtherBytes>& other) const
 		-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+
 		using ResultType = MPInt<maxPrecision(MaxBytes, OtherBytes)>;
 		ResultType result;
 
@@ -143,6 +186,7 @@ public:
 			result.sign = sign;
 		}
 
+		result.normalize();
 		result.checkSize();
 		return result;
 	}
@@ -151,6 +195,7 @@ public:
 	template <std::size_t OtherBytes>
 	auto operator*(const MPInt<OtherBytes>& other) const
 		-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+
 		if (isZero() || other.isZero()) {
 			return MPInt<maxPrecision(MaxBytes, OtherBytes)>();
 		}
@@ -161,6 +206,7 @@ public:
 		result.blocks = multiplyMagnitude(blocks, other.blocks);
 		result.sign = sign * other.sign;
 
+		result.normalize();
 		result.checkSize();
 		return result;
 	}
@@ -169,8 +215,8 @@ public:
 	template <std::size_t OtherBytes>
 	auto operator/(const MPInt<OtherBytes>& other) const
 		-> MPInt<maxPrecision(MaxBytes, OtherBytes)> {
+
 		if (other.isZero()) {
-			//TODO: custom exception class
 			throw std::domain_error("Division by zero");
 		}
 
@@ -180,6 +226,7 @@ public:
 		result.blocks = divideMagnitude(blocks, other.blocks);
 		result.sign = sign * other.sign;
 
+		result.normalize();
 		result.checkSize();
 		return result;
 	}
@@ -328,8 +375,7 @@ private:
 	void checkSize() const {
 		if constexpr (MaxBytes != Unlimited) {
 			if (usedBytes() > MaxBytes) {
-				//TODO: Change to custom exception class
-				throw std::overflow_error("Value exceeds maximum size");
+				throw MPIntOverflowException({ sign, blocks });
 			}
 		}
 	}
@@ -341,6 +387,7 @@ private:
 
 		narrowedResult.blocks = result.blocks;
 		narrowedResult.sign = result.sign;
+		narrowedResult.normalize();
 		narrowedResult.checkSize();
 
 		*this = std::move(narrowedResult);
@@ -350,8 +397,23 @@ private:
 	bool isZero() const {
 		return blocks.size() == 1 && blocks[0] == 0;
 	}
+
+	//normalize by removing leading zeroes and setting sign to positive if the number is zero
+	void normalize() {
+		normalizeMagnitude(blocks);
+
+		if (isZero()) {
+			sign = 1;
+		}
+	}
+
 	//remove leading zeroes
 	static void normalizeMagnitude(std::vector<uint32_t>& magnitude) {
+		if (magnitude.empty()) {
+			magnitude.push_back(0);
+			return;
+		}
+
 		while (magnitude.size() > 1 && magnitude.back() == 0) {
 			magnitude.pop_back();
 		}
@@ -514,5 +576,4 @@ private:
 		normalizeMagnitude(quotient);
 		return quotient;
 	}
-
 };
