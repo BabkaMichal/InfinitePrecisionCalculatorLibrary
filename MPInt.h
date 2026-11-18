@@ -19,6 +19,9 @@ edge cases
 //unlimited size constant
 inline constexpr std::size_t Unlimited = std::numeric_limits<std::size_t>::max();
 
+template <std::size_t Bytes>
+concept ValidPrecision = Bytes == Unlimited || Bytes >= 4;
+
 //max precision for multiple MPInt types
 consteval std::size_t maxPrecision(std::size_t left, std::size_t right) {
 	if (left == Unlimited || right == Unlimited)
@@ -52,16 +55,12 @@ class MPIntOverflowException : public std::overflow_error {
 };
 
 template <std::size_t MaxBytes>
+requires ValidPrecision<MaxBytes>
 class MPInt {
 	//can access private members of other MPInt types
-	template <std::size_t>
+	template <std::size_t OtherBytes>
+	requires ValidPrecision<OtherBytes>
 	friend class MPInt;
-
-	//asert of template parameters
-	static_assert(
-		MaxBytes == Unlimited || MaxBytes >= 4,
-		"MaxBytes must be Unlimited or at least 4"
-		);
 
 public:
 	//copy default because of vector
